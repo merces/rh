@@ -26,7 +26,7 @@ fn dump_line(data: &[u8], offset: usize) -> Result<String, &'static str> {
             line += " ";
         }
 
-        line += &format!("{:02X}", byte);
+        line += &format!("{byte:02X}");
 
         // handle ASCII
         let c = *byte as char;
@@ -37,33 +37,19 @@ fn dump_line(data: &[u8], offset: usize) -> Result<String, &'static str> {
         }
     }
 
-    line = format!("{:59}", line);
+    line = format!("{line:59}");
     line.push_str(&ascii);
     Ok(line)
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() != 2 {
-        eprintln!("I need a file to work with. 🥹");
-        exit(1);
-    }
-
-    let path = &args[1];
-    let mut file = File::open(path).expect("File not found");
-
+fn dump_file(file_path: &String) -> Result<usize, std::io::Error> {
+    let mut file = File::open(file_path)?;
     let mut ofs = 0;
+
     loop {
         let mut buffer = [0u8; CHUNK_SIZE];
 
-        let bytes_read = match file.read(&mut buffer) {
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("Error reading file: {e}");
-                return;
-            }
-        };
+        let bytes_read = file.read(&mut buffer)?;
 
         if bytes_read == 0 {
             break;
@@ -82,15 +68,33 @@ fn main() {
         ofs += bytes_read;
     }
 
+    Ok(ofs)
+}
+
+fn main() -> std::io::Result<()> {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() != 2 {
+        eprintln!("I need a file to work with. 🥹");
+        exit(1);
+    }
+
+    let file_path = &args[1];
+
+    let bytes_dumped = dump_file(file_path)?;
+
     // useful to quickly know the file size :)
-    println!("{ofs:08x}:");
+    println!("{bytes_dumped:08x}:");
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     #[test]
-    fn hexdump_one() {
+    fn dump_line_one() {
         let data: [u8; 1] = [0x90];
         assert_eq!(
             dump_line(&data, 0),
@@ -100,7 +104,7 @@ mod tests {
         );
     }
     #[test]
-    fn hexdump_a() {
+    fn dump_line_a() {
         let data: [u8; 1] = ['A' as u8];
         assert_eq!(
             dump_line(&data, 0),
@@ -110,7 +114,7 @@ mod tests {
         );
     }
     #[test]
-    fn hexdump_one_zero() {
+    fn dump_line_one_zero() {
         let data: [u8; 1] = [0u8];
         assert_eq!(
             dump_line(&data, 0),
@@ -120,7 +124,7 @@ mod tests {
         );
     }
     #[test]
-    fn hexdump_four() {
+    fn dump_line_four() {
         let data: &[u8] = "paix".as_bytes();
         assert_eq!(
             dump_line(&data, 0),
@@ -130,7 +134,7 @@ mod tests {
         );
     }
     #[test]
-    fn hexdump_five() {
+    fn dump_line_five() {
         let data: &[u8] = "paixx".as_bytes();
         assert_eq!(
             dump_line(&data, 0),
@@ -140,7 +144,7 @@ mod tests {
         );
     }
     #[test]
-    fn hexdump_eight() {
+    fn dump_line_eight() {
         let data: &[u8] = "fernando".as_bytes();
         assert_eq!(
             dump_line(data, 0),
@@ -150,7 +154,7 @@ mod tests {
         );
     }
     #[test]
-    fn hexdump_sixteen() {
+    fn dump_line_sixteen() {
         let data: &[u8] = "1234567812345678".as_bytes();
         assert_eq!(
             dump_line(data, 0),
@@ -158,5 +162,12 @@ mod tests {
                 "00000000: 31 32 33 34{SEPARATOR_DWORD}35 36 37 38{SEPARATOR_DWORD}31 32 33 34{SEPARATOR_DWORD}35 36 37 38  1234567812345678"
             ))
         );
+    }
+    #[test]
+    fn dump_file_ls() {
+        let file_path = "/bin/ls";
+        let metadata = fs::metadata(file_path).unwrap();
+        let file_size = dump_file(&String::from(file_path)).unwrap();
+        assert_eq!(metadata.len(), file_size as u64);
     }
 }
