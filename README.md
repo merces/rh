@@ -1,2 +1,4 @@
 # rh
-CLI hexadecimal viewer
+
+This is just me playing with Rust. :)
+
