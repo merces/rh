@@ -1,12 +1,46 @@
 use std::env;
 use std::fs::File;
 use std::io::Read;
-use std::process::exit;
 
+/// O tamanho do buffer para ler leitura do arquivo
 const CHUNK_SIZE: usize = 4096; // 4KB
+
+/// O caractere que vai separar cada _double word_
+/// (quatro bytes) na visualização hexadecimal.
 const SEPARATOR_DWORD: char = ' ';
+
+/// Se um byte não faz parte da faixa imprimível
+/// da tabela ASCII, o caractere que será impresso
+/// no lugar dele.
 const NON_PRINTABLE_CHAR: char = ' ';
 
+/// Recebe 16 bytes de dados e um offset e os retorna
+/// formatados no estilo de um visualizador hexadecimal
+/// de linha de comando, tipo `hexdump`, `xxd`, etc.
+///
+/// # Argumentos
+///
+/// * `data` - Uma referência para um slide de bytes, que deve
+///   conter até 16 bytes para serem formatados.
+///
+/// * `offset` - o valor do offset que será formatado junto
+///   aos bytes.
+///
+/// # Retorna
+///
+/// Uma `String` contendo o offset, os bytes formatados e
+/// o equivalente ASCII dos bytes, se houver. Ou uma string de erro.
+///
+/// # Exemplo
+///
+/// Assumindo que `SEPARATOR_DWORD` é `' '`:
+/// ```
+/// let data: &[u8] = "qualquercoisa".as_bytes();
+/// assert_eq!(
+///         dump_line(data, 0),
+///         Ok(format!("00000000: 71 75 61 6C 71 75 65 72 63 6F 69 73 61           qualquercoisa"))
+///     );
+/// ```
 fn dump_line(data: &[u8], offset: usize) -> Result<String, &'static str> {
     let data_len = data.len();
 
@@ -42,14 +76,24 @@ fn dump_line(data: &[u8], offset: usize) -> Result<String, &'static str> {
     Ok(line)
 }
 
-fn dump_file(file_path: &String) -> Result<usize, std::io::Error> {
-    let mut file = File::open(file_path)?;
+/// Lê um arquivo em pedaços de `CHUNK_SIZE` bytes e para cada pedaço lido,
+/// pega 16 bytes deste pedaço e manda para `dump_line()`.
+///
+/// # Argumentos
+///
+/// * `reader` - um ponteiro inteligente `Box<T>` para um tipo que implemente
+///   a trait `Read` (normalmente `File` ou `Stdin`).
+///
+/// # Retorna
+///
+/// O número de bytes lidos/"dumpados" ou std::io::Error.
+fn dump_file<R: Read>(mut reader: R) -> Result<usize, std::io::Error> {
     let mut ofs = 0;
 
     loop {
         let mut buffer = [0u8; CHUNK_SIZE];
 
-        let bytes_read = file.read(&mut buffer)?;
+        let bytes_read = reader.read(&mut buffer)?;
 
         if bytes_read == 0 {
             break;
@@ -57,7 +101,7 @@ fn dump_file(file_path: &String) -> Result<usize, std::io::Error> {
 
         let mut pos = 0;
         while pos < bytes_read {
-            let end = (pos + 16).min(bytes_read); // it can't exceed `bytes_read`
+            let end = (pos + 16).min(bytes_read); // `end` não pode ser maior que `bytes_read`
             match dump_line(&buffer[pos..end], ofs + pos) {
                 Ok(line) => println!("{line}"),
                 Err(err) => eprintln!("{err}"),
@@ -74,17 +118,20 @@ fn dump_file(file_path: &String) -> Result<usize, std::io::Error> {
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("I need a file to work with. 🥹");
-        exit(1);
-    }
+    // reader será um `Box<T>``, ou seja, um ponteiro inteligente (alocado na heap).
+    // Ao declará-la como `Box<dyn Read>``, digo que é um ponteiro para qualquer tipo
+    // que implemente a trait Read. Dessa forma, dump_file() pode receber tanto
+    // um File, retornado por File::open() em caso de sucesso, quanto Stdin,
+    // retornado por std::io::stdin().
+    let reader: Box<dyn Read> = if args.len() > 1 {
+        Box::new(File::open(&args[1])?)
+    } else {
+        Box::new(std::io::stdin())
+    };
 
-    let file_path = &args[1];
-
-    let bytes_dumped = dump_file(file_path)?;
-
-    // useful to quickly know the file size :)
-    println!("{bytes_dumped:08x}:");
+    // dump_file() retorna o número de bytes "dumpados", que imprimo na tela.
+    // É uma maneira fácil de visualizar o tamanho do arquivo também.
+    println!("{:08x}:", dump_file(reader)?);
     Ok(())
 }
 
@@ -166,8 +213,9 @@ mod tests {
     #[test]
     fn dump_file_ls() {
         let file_path = "/bin/ls";
+        let file = File::open(file_path).unwrap();
         let metadata = fs::metadata(file_path).unwrap();
-        let file_size = dump_file(&String::from(file_path)).unwrap();
+        let file_size = dump_file(file).unwrap();
         assert_eq!(metadata.len(), file_size as u64);
     }
 }
