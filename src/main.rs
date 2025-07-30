@@ -1,9 +1,10 @@
 use std::env;
 use std::fs::File;
+use std::io::BufReader;
 use std::io::Read;
 
 /// O tamanho do buffer para ler leitura do arquivo
-const CHUNK_SIZE: usize = 4096; // 4KB
+const BUFFER_SIZE: usize = 4096; // 4KB
 
 /// O caractere que vai separar cada _double word_
 /// (quatro bytes) na visualização hexadecimal.
@@ -71,13 +72,13 @@ fn dump_line(data: &[u8], offset: usize) -> Result<String, &'static str> {
         }
     }
 
-    line = format!("{line:59}");
-    line.push_str(&ascii);
+    line = format!("{line:59}{ascii}");
     Ok(line)
 }
 
-/// Lê um arquivo em pedaços de `CHUNK_SIZE` bytes e para cada pedaço lido,
-/// pega 16 bytes deste pedaço e manda para `dump_line()`.
+/// Usa um buffer de `BUFFER_SIZE` bytes
+/// para ler chunks de 16 bytes dele e enviar
+/// esses slices para a função dump_line()
 ///
 /// # Argumentos
 ///
@@ -87,27 +88,28 @@ fn dump_line(data: &[u8], offset: usize) -> Result<String, &'static str> {
 /// # Retorna
 ///
 /// O número de bytes lidos/"dumpados" ou std::io::Error.
-fn dump_file<R: Read>(mut reader: R) -> Result<usize, std::io::Error> {
+fn dump_file<R: Read>(reader: R) -> Result<usize, std::io::Error> {
+    let mut buf_reader = BufReader::with_capacity(BUFFER_SIZE, reader);
+    let mut chunk: [u8; 16] = [0u8; 16];
     let mut ofs = 0;
 
     loop {
-        let mut buffer = [0u8; CHUNK_SIZE];
-
-        let bytes_read = reader.read(&mut buffer)?;
+        let bytes_read = match buf_reader.read(&mut chunk) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{e}");
+                break;
+            }
+        };
 
         if bytes_read == 0 {
             break;
         }
 
-        let mut pos = 0;
-        while pos < bytes_read {
-            let end = (pos + 16).min(bytes_read); // `end` não pode ser maior que `bytes_read`
-            match dump_line(&buffer[pos..end], ofs + pos) {
-                Ok(line) => println!("{line}"),
-                Err(err) => eprintln!("{err}"),
-            };
-            pos += 16;
-        }
+        match dump_line(&chunk[..bytes_read], ofs) {
+            Ok(line) => println!("{line}"),
+            Err(e) => println!("{e}"),
+        };
 
         ofs += bytes_read;
     }
